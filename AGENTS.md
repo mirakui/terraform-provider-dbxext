@@ -1,6 +1,8 @@
 <!-- SPECKIT START -->
+Current feature plan: `specs/001-postgresql-secret-connection/plan.md`
+
 For additional context about technologies to be used, project structure,
-shell commands, and other important information, read the current plan
+shell commands, and other important information, read the current plan.
 <!-- SPECKIT END -->
 
 Follow `.specify/memory/constitution.md` for project governance. Commit
