@@ -2,12 +2,15 @@ package databricks
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/databricks/databricks-sdk-go"
 	"github.com/databricks/databricks-sdk-go/service/catalog"
 )
+
+var ErrNotFound = databricks.ErrNotFound
 
 type Config struct {
 	Host  string
@@ -34,7 +37,6 @@ type ConnectionRequest struct {
 	Owner                 string
 	Properties            map[string]string
 	EnvironmentSettings   *EnvironmentSettings
-	ProviderConfig        *ProviderConfig
 	PasswordSecretVersion int64
 }
 
@@ -56,17 +58,12 @@ type ConnectionInfo struct {
 	Owner               string
 	Properties          map[string]string
 	EnvironmentSettings *EnvironmentSettings
-	ProviderConfig      *ProviderConfig
 	ProvisioningInfo    *ProvisioningInfo
 }
 
 type EnvironmentSettings struct {
 	EnvironmentVersion string
 	JavaDependencies   []string
-}
-
-type ProviderConfig struct {
-	WorkspaceID int64
 }
 
 type ProvisioningInfo struct {
@@ -132,10 +129,17 @@ func (c *sdkConnectionClient) CreateConnection(ctx context.Context, req Connecti
 func (c *sdkConnectionClient) GetConnection(ctx context.Context, name string) (ConnectionInfo, error) {
 	info, err := c.workspace.Connections.Get(ctx, catalog.GetConnectionRequest{Name: name})
 	if err != nil {
-		return ConnectionInfo{}, err
+		return ConnectionInfo{}, normalizeConnectionError(err)
 	}
 
 	return fromSDKConnectionInfo(info), nil
+}
+
+func normalizeConnectionError(err error) error {
+	if errors.Is(err, databricks.ErrNotFound) || errors.Is(err, databricks.ErrResourceDoesNotExist) {
+		return ErrNotFound
+	}
+	return err
 }
 
 func (c *sdkConnectionClient) UpdateConnection(ctx context.Context, name string, req ConnectionRequest) (ConnectionInfo, error) {

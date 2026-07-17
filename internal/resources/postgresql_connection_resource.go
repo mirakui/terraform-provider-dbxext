@@ -2,6 +2,7 @@ package resources
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -14,7 +15,6 @@ import (
 	rschema "github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/mapplanmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/objectplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -51,7 +51,6 @@ type PostgreSQLConnectionModel struct {
 	Owner                 string                    `tfsdk:"owner"`
 	Properties            map[string]string         `tfsdk:"properties"`
 	EnvironmentSettings   *EnvironmentSettingsModel `tfsdk:"environment_settings"`
-	ProviderConfig        *ProviderConfigModel      `tfsdk:"provider_config"`
 }
 
 type PasswordSecretModel struct {
@@ -62,10 +61,6 @@ type PasswordSecretModel struct {
 type EnvironmentSettingsModel struct {
 	EnvironmentVersion string   `tfsdk:"environment_version"`
 	JavaDependencies   []string `tfsdk:"java_dependencies"`
-}
-
-type ProviderConfigModel struct {
-	WorkspaceID int64 `tfsdk:"workspace_id"`
 }
 
 type ProvisioningInfoModel struct {
@@ -170,7 +165,11 @@ func (r *PostgreSQLConnectionResource) Schema(ctx context.Context, req resource.
 			},
 			"owner": rschema.StringAttribute{
 				Optional:            true,
+				Computed:            true,
 				MarkdownDescription: "Databricks connection owner.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"properties": rschema.MapAttribute{
 				Optional:            true,
@@ -201,23 +200,13 @@ func (r *PostgreSQLConnectionResource) Schema(ctx context.Context, req resource.
 				Attributes: map[string]rschema.Attribute{
 					"scope": rschema.StringAttribute{
 						Required:            true,
+						Sensitive:           true,
 						MarkdownDescription: "Databricks secret scope.",
 					},
 					"key": rschema.StringAttribute{
 						Required:            true,
+						Sensitive:           true,
 						MarkdownDescription: "Databricks secret key.",
-					},
-				},
-			},
-			"provider_config": rschema.SingleNestedBlock{
-				MarkdownDescription: "Optional workspace routing metadata.",
-				PlanModifiers: []planmodifier.Object{
-					objectplanmodifier.RequiresReplace(),
-				},
-				Attributes: map[string]rschema.Attribute{
-					"workspace_id": rschema.Int64Attribute{
-						Required:            true,
-						MarkdownDescription: "Databricks workspace ID.",
 					},
 				},
 			},
@@ -258,13 +247,16 @@ func (r *PostgreSQLConnectionResource) Read(ctx context.Context, req resource.Re
 		return
 	}
 
-	remote, err := r.client.GetConnection(ctx, state.Name)
+	state, exists, err := ReadPostgreSQLConnection(ctx, r.client, state)
 	if err != nil {
 		resp.Diagnostics.AddError("Unable to read PostgreSQL connection", err.Error())
 		return
 	}
+	if !exists {
+		resp.State.RemoveResource(ctx)
+		return
+	}
 
-	state = mergeConnectionInfo(state, remote)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
@@ -393,7 +385,12 @@ func CreatePostgreSQLConnection(ctx context.Context, client dbclient.ConnectionC
 		return PostgreSQLConnectionModel{}, err
 	}
 
-	return mergeConnectionInfo(model, remote), nil
+	state := mergeConnectionInfo(model, remote)
+	if strings.TrimSpace(model.Owner) != "" && state.Owner != strings.TrimSpace(model.Owner) {
+		return UpdatePostgreSQLConnection(ctx, client, state, model)
+	}
+
+	return state, nil
 }
 
 func DeletePostgreSQLConnection(ctx context.Context, client dbclient.ConnectionClient, name string) error {
@@ -401,6 +398,17 @@ func DeletePostgreSQLConnection(ctx context.Context, client dbclient.ConnectionC
 		return fmt.Errorf("Databricks connection client is required")
 	}
 	return client.DeleteConnection(ctx, name)
+}
+
+func ReadPostgreSQLConnection(ctx context.Context, client dbclient.ConnectionClient, state PostgreSQLConnectionModel) (PostgreSQLConnectionModel, bool, error) {
+	remote, err := client.GetConnection(ctx, state.Name)
+	if err != nil {
+		if errors.Is(err, dbclient.ErrNotFound) {
+			return PostgreSQLConnectionModel{}, false, nil
+		}
+		return PostgreSQLConnectionModel{}, true, err
+	}
+	return mergeConnectionInfo(state, remote), true, nil
 }
 
 func UpdatePostgreSQLConnection(ctx context.Context, client dbclient.ConnectionClient, prior PostgreSQLConnectionModel, plan PostgreSQLConnectionModel) (PostgreSQLConnectionModel, error) {
@@ -443,7 +451,7 @@ func ValidatePostImportUpdateReady(ctx context.Context, model PostgreSQLConnecti
 
 func PostgreSQLConnectionFieldRequiresReplacement(field string) bool {
 	switch field {
-	case "comment", "properties", "read_only", "provider_config":
+	case "comment", "properties", "read_only":
 		return true
 	default:
 		return false

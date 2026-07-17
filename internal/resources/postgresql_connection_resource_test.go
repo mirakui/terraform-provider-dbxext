@@ -83,6 +83,44 @@ func TestPostgreSQLConnectionSchemaDoesNotExposeGenericConnectionFields(t *testi
 	}
 }
 
+func TestPostgreSQLConnectionSchemaAvoidsOwnerDriftAndSecretDisclosure(t *testing.T) {
+	t.Parallel()
+
+	schema := postgreSQLConnectionSchema(t)
+
+	ownerAttr, ok := schema.Attributes["owner"].(rschema.StringAttribute)
+	if !ok {
+		t.Fatalf("expected owner to be a string attribute, got %T", schema.Attributes["owner"])
+	}
+	if !ownerAttr.Optional || !ownerAttr.Computed {
+		t.Fatalf("expected owner to be optional and computed, got optional=%t computed=%t", ownerAttr.Optional, ownerAttr.Computed)
+	}
+	if len(ownerAttr.PlanModifiers) == 0 {
+		t.Fatal("expected owner to preserve prior state when Terraform cannot know the Databricks default owner")
+	}
+
+	secretBlock := schema.Blocks["password_secret"].(rschema.SingleNestedBlock)
+	for _, name := range []string{"scope", "key"} {
+		attr := secretBlock.Attributes[name].(rschema.StringAttribute)
+		if !attr.Sensitive {
+			t.Fatalf("expected password_secret.%s to be sensitive metadata", name)
+		}
+	}
+}
+
+func TestPostgreSQLConnectionSchemaDoesNotExposeUnsupportedProviderConfig(t *testing.T) {
+	t.Parallel()
+
+	schema := postgreSQLConnectionSchema(t)
+
+	if _, ok := schema.Blocks["provider_config"]; ok {
+		t.Fatal("provider_config must not be exposed until the Databricks connection API supports it")
+	}
+	if PostgreSQLConnectionFieldRequiresReplacement("provider_config") {
+		t.Fatal("provider_config must not be part of lifecycle rules when it is not exposed")
+	}
+}
+
 func TestPostgreSQLConnectionValidationRejectsInvalidRequiredValues(t *testing.T) {
 	t.Parallel()
 
@@ -154,6 +192,35 @@ func TestPostgreSQLConnectionCreateUsesSecretBackedTypedOptions(t *testing.T) {
 	}
 }
 
+func TestPostgreSQLConnectionCreateAppliesConfiguredOwnerAfterCreate(t *testing.T) {
+	t.Parallel()
+
+	client := &mockConnectionClient{
+		createOwner: "creator@example.com",
+		updateOwner: "data-owner@example.com",
+	}
+	model := validPostgreSQLConnectionModel()
+	model.Owner = "data-owner@example.com"
+
+	state, err := CreatePostgreSQLConnection(context.Background(), client, model)
+	if err != nil {
+		t.Fatalf("unexpected create error: %v", err)
+	}
+
+	if client.updatedName != "psql" {
+		t.Fatalf("expected create to update owner after remote creation, got update name %q", client.updatedName)
+	}
+	if client.updated.Owner != "data-owner@example.com" {
+		t.Fatalf("expected owner update request, got %q", client.updated.Owner)
+	}
+	if client.updated.Options["password"] != "secret('scope', 'password')" {
+		t.Fatalf("expected owner update to preserve password secret reference, got %q", client.updated.Options["password"])
+	}
+	if state.Owner != "data-owner@example.com" {
+		t.Fatalf("expected final state owner data-owner@example.com, got %q", state.Owner)
+	}
+}
+
 func TestPostgreSQLConnectionDeleteUsesConnectionName(t *testing.T) {
 	t.Parallel()
 
@@ -171,7 +238,7 @@ func TestPostgreSQLConnectionDeleteUsesConnectionName(t *testing.T) {
 func TestPostgreSQLConnectionLifecycleReplacementDecisions(t *testing.T) {
 	t.Parallel()
 
-	replacementFields := []string{"comment", "properties", "read_only", "provider_config"}
+	replacementFields := []string{"comment", "properties", "read_only"}
 	for _, field := range replacementFields {
 		if !PostgreSQLConnectionFieldRequiresReplacement(field) {
 			t.Fatalf("expected %s to require replacement", field)
@@ -329,6 +396,20 @@ func TestPostgreSQLConnectionReadMapsComputedRemoteFields(t *testing.T) {
 	}
 }
 
+func TestPostgreSQLConnectionReadTreatsRemoteNotFoundAsGone(t *testing.T) {
+	t.Parallel()
+
+	client := &mockConnectionClient{getErr: dbclient.ErrNotFound}
+
+	_, exists, err := ReadPostgreSQLConnection(context.Background(), client, validPostgreSQLConnectionModel())
+	if err != nil {
+		t.Fatalf("expected not found to remove state without an error, got %v", err)
+	}
+	if exists {
+		t.Fatal("expected remote not found to mark the resource absent")
+	}
+}
+
 func postgreSQLConnectionSchema(t *testing.T) rschema.Schema {
 	t.Helper()
 
@@ -386,6 +467,9 @@ type mockConnectionClient struct {
 	updated     dbclient.ConnectionRequest
 	updatedName string
 	deletedName string
+	createOwner string
+	updateOwner string
+	getErr      error
 }
 
 func (m *mockConnectionClient) CreateConnection(ctx context.Context, req dbclient.ConnectionRequest) (dbclient.ConnectionInfo, error) {
@@ -395,10 +479,14 @@ func (m *mockConnectionClient) CreateConnection(ctx context.Context, req dbclien
 		Name:           req.Name,
 		ConnectionType: req.ConnectionType,
 		Options:        req.Options,
+		Owner:          m.createOwner,
 	}, nil
 }
 
 func (m *mockConnectionClient) GetConnection(ctx context.Context, name string) (dbclient.ConnectionInfo, error) {
+	if m.getErr != nil {
+		return dbclient.ConnectionInfo{}, m.getErr
+	}
 	return dbclient.ConnectionInfo{
 		ID:   "connection-id",
 		Name: name,
@@ -408,12 +496,16 @@ func (m *mockConnectionClient) GetConnection(ctx context.Context, name string) (
 func (m *mockConnectionClient) UpdateConnection(ctx context.Context, name string, req dbclient.ConnectionRequest) (dbclient.ConnectionInfo, error) {
 	m.updatedName = name
 	m.updated = req
+	owner := req.Owner
+	if m.updateOwner != "" {
+		owner = m.updateOwner
+	}
 	return dbclient.ConnectionInfo{
 		ID:             "connection-id",
 		Name:           req.Name,
 		ConnectionType: req.ConnectionType,
 		Options:        req.Options,
-		Owner:          req.Owner,
+		Owner:          owner,
 	}, nil
 }
 

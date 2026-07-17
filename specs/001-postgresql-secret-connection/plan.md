@@ -58,9 +58,11 @@ complete within Databricks API latency and surface async provisioning failures.
 **Constraints**: Red-Green TDD is mandatory; the provider must never call a
 Databricks secret-read API for the password; raw password text must be absent
 from state, plans, diagnostics, logs, docs, examples, and tests; comment,
-properties, provider configuration, and read-only changes require replacement;
-typed PostgreSQL options, owner, environment settings, name, and password secret
-metadata update in place.
+properties, and read-only changes require replacement; typed PostgreSQL options,
+owner, environment settings, name, and password secret metadata update in place.
+Resource-level workspace routing metadata is not exposed because the Databricks
+Unity Catalog Connections SDK/API path used by this provider does not accept a
+corresponding field.
 
 **Scale/Scope**: One PostgreSQL connection per resource instance. Initial scope
 excludes other connection types and arbitrary untyped options.

@@ -80,7 +80,6 @@ Changing any of these fields creates a replacement plan:
 - `comment`
 - `properties`
 - `read_only`
-- `provider_config`
 
 Replacement must still avoid raw password values in plan output.
 

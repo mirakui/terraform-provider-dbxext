@@ -22,12 +22,10 @@ external connection.
 | `comment` | string | no | stored | replacement | Optional free-form text |
 | `read_only` | bool | no | stored | replacement | Defaults to Databricks/provider default when unset |
 | `properties` | map(string) | no | stored | replacement | Keys and values are non-secret strings |
-| `owner` | string | no | stored | in-place update | Optional non-empty owner principal |
+| `owner` | string | no | stored | in-place update | Optional non-empty owner principal; Databricks default owner is read into state when omitted |
 | `environment_settings` | object | no | stored | in-place update | Mirrors upstream connection environment settings |
 | `environment_settings.environment_version` | string | no | stored | in-place update | Optional non-empty string |
 | `environment_settings.java_dependencies` | list(string) | no | stored | in-place update | Optional list of non-empty strings |
-| `provider_config` | object | no | stored | replacement | Optional workspace routing metadata |
-| `provider_config.workspace_id` | number | yes when block set | stored | replacement | Positive workspace identifier |
 | `url` | string | computed | stored | read-only | Databricks-derived remote URL |
 | `created_at` | number | computed | stored | read-only | Epoch milliseconds |
 | `created_by` | string | computed | stored | read-only | Databricks principal |
@@ -52,9 +50,11 @@ external connection.
 
 - `PostgreSQLConnectionResource` owns one `PasswordSecretReference`.
 - `PostgreSQLConnectionResource` may include one `EnvironmentSettings` block.
-- `PostgreSQLConnectionResource` may include one `ProviderConfig` block.
 - `PostgreSQLConnectionResource` maps to one remote Databricks connection with
   fixed type `POSTGRESQL`.
+- Resource-level workspace routing metadata is not part of this model because
+  the Databricks Unity Catalog Connections SDK/API path does not accept a
+  corresponding field.
 
 ## Entity: PasswordSecretReference
 
@@ -108,8 +108,7 @@ Absent
   password secret version.
 - In-place update is allowed for name, host, port, user, owner, environment
   settings, password secret scope/key, and password secret version.
-- Replacement is required for comment, properties, provider configuration, and
-  read-only.
+- Replacement is required for comment, properties, and read-only.
 - Delete removes the remote connection and clears state.
 - Import populates non-secret remote fields and requires configuration of user
   and password secret metadata before managed updates that need password

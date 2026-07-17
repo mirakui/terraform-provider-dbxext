@@ -47,6 +47,12 @@ Expected environment variables:
 ```bash
 export DATABRICKS_HOST="https://example.cloud.databricks.com"
 export DATABRICKS_TOKEN="..."
+export DBXEXT_ACC_POSTGRESQL_CONNECTION_NAME="dbxext_acc_psql"
+export DBXEXT_ACC_POSTGRESQL_HOST="postgres.example.com"
+export DBXEXT_ACC_POSTGRESQL_PORT="5432"
+export DBXEXT_ACC_POSTGRESQL_USER="postgres_user"
+export DBXEXT_ACC_POSTGRESQL_SECRET_SCOPE="database"
+export DBXEXT_ACC_POSTGRESQL_SECRET_KEY="postgres-password"
 export TF_ACC=1
 ```
 
@@ -56,5 +62,8 @@ Run the PostgreSQL connection acceptance tests with:
 TF_ACC=1 go test ./internal/resources -run TestAccPostgreSQLConnection
 ```
 
-Use isolated connection names and a Databricks secret scope/key containing the
-PostgreSQL password when enabling full acceptance scenarios.
+The update acceptance test additionally requires
+`DBXEXT_ACC_POSTGRESQL_UPDATED_HOST` so the test can verify a host change while
+reapplying the same password secret reference. Use isolated connection names
+and a Databricks secret scope/key containing the PostgreSQL password when
+enabling full acceptance scenarios.

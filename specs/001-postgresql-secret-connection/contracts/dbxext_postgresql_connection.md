@@ -57,9 +57,8 @@ resource "dbxext_postgresql_connection" "psql" {
 | `comment` | string | replacement | Free-form Databricks connection comment. |
 | `read_only` | bool | replacement | Databricks read-only connection setting. |
 | `properties` | map(string) | replacement | Non-secret Databricks connection properties. |
-| `owner` | string | in-place update | Databricks connection owner principal. |
+| `owner` | string | in-place update | Databricks connection owner principal. If omitted, the Databricks default owner is read into state. |
 | `environment_settings` | block | in-place update | Databricks connection environment settings. |
-| `provider_config` | block | replacement | Optional workspace routing metadata. |
 
 ### `environment_settings` Block
 
@@ -67,12 +66,6 @@ resource "dbxext_postgresql_connection" "psql" {
 |------|------|-------------|
 | `environment_version` | string | Optional Databricks connection environment version. |
 | `java_dependencies` | list(string) | Optional Java dependency list. |
-
-### `provider_config` Block
-
-| Name | Type | Description |
-|------|------|-------------|
-| `workspace_id` | number | Workspace ID for account-provider-managed resources. |
 
 ### Computed Attributes
 
@@ -97,11 +90,15 @@ resource "dbxext_postgresql_connection" "psql" {
 - `port` must be an integer from 1 through 65535.
 - `password_secret_version` must be a positive integer.
 - `password_secret` must appear exactly once.
-- Unsupported `connection_type`, `options`, and `password` fields must produce
-  Terraform schema errors.
+- Unsupported `connection_type`, `options`, `password`, and `provider_config`
+  fields must produce Terraform schema errors.
 - Secret scope/key values must be safely representable in a Databricks
   `secret(scope, key)` expression; unsupported values must fail before any
   remote change.
+- Resource-level workspace routing metadata is not exposed because the
+  Databricks Unity Catalog Connections SDK/API path used by this provider does
+  not accept a corresponding field. Users must select the target workspace via
+  provider configuration.
 
 ## Remote Mapping Contract
 
@@ -133,7 +130,11 @@ password and must not read the secret value.
 | `comment` | Replacement. |
 | `properties` | Replacement. |
 | `read_only` | Replacement. |
-| `provider_config` | Replacement. |
+
+The Databricks create API path used by this provider does not accept `owner`
+directly. If `owner` is configured during creation, the provider creates the
+connection first and then immediately reconciles the owner with an update that
+also sends the configured password secret reference.
 
 ## Import Contract
 
@@ -168,5 +169,5 @@ The implementation must include RED/GREEN coverage for:
 - Absence of raw password in state, plan, diagnostics, logs, docs, and examples.
 - In-place update for host, port, user, owner, environment settings, and
   password secret metadata.
-- Replacement for comment, properties, read-only, and provider configuration.
+- Replacement for comment, properties, and read-only.
 - Import followed by required user/password metadata configuration.

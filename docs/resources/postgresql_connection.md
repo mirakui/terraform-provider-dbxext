@@ -58,21 +58,16 @@ resource "dbxext_postgresql_connection" "psql" {
 
 - `comment` (String) Databricks connection comment.
 - `read_only` (Boolean) Databricks read-only connection setting.
-- `owner` (String) Databricks connection owner.
+- `owner` (String) Databricks connection owner. If omitted, the Databricks
+  default owner is read into state.
 - `properties` (Map of String) Non-secret connection properties.
 - `environment_settings` (Block) Databricks connection environment settings.
-- `provider_config` (Block) Optional workspace routing metadata.
 
 ### `environment_settings`
 
 - `environment_version` (String) Optional Databricks connection environment
   version.
 - `java_dependencies` (List of String) Optional Java dependency coordinates.
-
-### `provider_config`
-
-- `workspace_id` (Number) Workspace ID for account-provider-managed resources.
-  Changing this block requires replacement.
 
 ## Computed
 
@@ -100,6 +95,11 @@ Databricks secret expression.
 The resource does not expose `connection_type`, `options`, or raw `password`
 arguments.
 
+The resource also does not expose a `provider_config` block. The Databricks
+Unity Catalog Connections SDK/API path used by this provider does not accept a
+resource-level workspace routing field; configure the target Databricks
+workspace in the provider block instead.
+
 ## Update Behavior
 
 Changes to these fields update the existing Databricks connection in place:
@@ -117,12 +117,16 @@ Every in-place update sends the configured password secret reference again so
 Databricks does not drop the existing external connection password while
 updating non-secret fields.
 
+The Databricks create API path used by this provider does not accept `owner`
+directly. When `owner` is configured, the provider creates the connection and
+then immediately reconciles the owner with an update that also sends the
+configured password secret reference.
+
 Changes to these fields require replacement:
 
 - `comment`
 - `properties`
 - `read_only`
-- `provider_config`
 
 ## Import
 

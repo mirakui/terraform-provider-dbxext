@@ -107,7 +107,7 @@ prove RED, implement the minimal GREEN change, then refactor with tests passing.
 
 **Goal**: Users can update in-place fields with the password secret reference preserved, while replacement-only fields plan replacement.
 
-**Independent Test**: Start from a managed connection, update host/port/user/owner/environment settings, and verify the update payload includes the secret reference and contains no plaintext password; verify comment/properties/read_only/provider_config force replacement.
+**Independent Test**: Start from a managed connection, update host/port/user/owner/environment settings, and verify the update payload includes the secret reference and contains no plaintext password; verify comment/properties/read_only force replacement.
 
 ### RED Tests for User Story 2
 
@@ -115,7 +115,7 @@ prove RED, implement the minimal GREEN change, then refactor with tests passing.
 - [X] T037 [P] [US2] Write RED lifecycle plan tests for in-place fields versus replacement fields in internal/resources/postgresql_connection_resource_test.go
 - [X] T038 [P] [US2] Write RED update resource tests with a mock Databricks client in internal/resources/postgresql_connection_resource_test.go
 - [X] T039 [P] [US2] Write RED import/adoption tests requiring user and password secret metadata before managed updates in internal/resources/postgresql_connection_resource_test.go
-- [X] T040 [P] [US2] Write RED acceptance update and replacement-plan skeletons gated by TF_ACC in internal/resources/postgresql_connection_acceptance_test.go
+- [X] T040 [P] [US2] Write RED acceptance update and replacement-plan tests gated by TF_ACC in internal/resources/postgresql_connection_acceptance_test.go
 - [X] T041 [US2] Run RED command `go test ./internal/resources ./internal/databricks -run 'TestPostgreSQLConnection(Update|Lifecycle|Import)'` and record failure notes in specs/001-postgresql-secret-connection/tasks.md
   - RED 2026-07-09: expected failures for missing update mapper payload, missing replacement lifecycle rules, missing resource update behavior, and missing post-import metadata guard.
 
@@ -123,8 +123,8 @@ prove RED, implement the minimal GREEN change, then refactor with tests passing.
 
 - [X] T042 [US2] Implement update request mapping for typed PostgreSQL options, owner, environment_settings, and password secret metadata in internal/databricks/connection_mapper.go
 - [X] T043 [US2] Implement resource Update operation with password secret reference preservation in internal/resources/postgresql_connection_resource.go
-- [X] T044 [US2] Implement plan modifiers requiring replacement for comment, properties, read_only, and provider_config in internal/resources/postgresql_connection_resource.go
-- [X] T045 [US2] Implement owner, properties, environment_settings, and provider_config schema/read mapping in internal/resources/postgresql_connection_resource.go
+- [X] T044 [US2] Implement plan modifiers requiring replacement for comment, properties, and read_only in internal/resources/postgresql_connection_resource.go
+- [X] T045 [US2] Implement owner, properties, and environment_settings schema/read mapping in internal/resources/postgresql_connection_resource.go
 - [X] T046 [US2] Implement import state behavior and post-import diagnostics for missing user/password metadata in internal/resources/postgresql_connection_resource.go
 - [X] T047 [US2] Document update, replacement, and import behavior in docs/resources/postgresql_connection.md
 - [X] T048 [US2] Run GREEN command `go test ./internal/resources ./internal/databricks -run 'TestPostgreSQLConnection(Update|Lifecycle|Import)'` and record passing notes in specs/001-postgresql-secret-connection/tasks.md
@@ -176,10 +176,16 @@ prove RED, implement the minimal GREEN change, then refactor with tests passing.
   - GREEN 2026-07-09: command returned no matches, as expected.
 - [X] T063 Run acceptance test command `TF_ACC=1 go test ./internal/resources -run TestAccPostgreSQLConnection` when Databricks credentials are available and record result or explicit skip reason in specs/001-postgresql-secret-connection/tasks.md
   - SKIP 2026-07-09: command passed with acceptance skeletons skipped because Databricks workspace credentials and isolated connection names are not configured in this environment.
+  - SKIP 2026-07-17: acceptance tests now execute Terraform Plugin Testing when `TF_ACC=1` and required `DATABRICKS_*` and `DBXEXT_ACC_POSTGRESQL_*` inputs are present; this environment does not provide Databricks credentials or isolated PostgreSQL test inputs.
 - [X] T064 Run `go mod tidy` and verify go.mod and go.sum are stable
   - GREEN 2026-07-09: `go mod tidy` completed and `git diff -- go.mod go.sum` showed no changes.
 - [X] T065 Review implementation against contracts/dbxext_postgresql_connection.md and update specs/001-postgresql-secret-connection/tasks.md with any resolved deviations
-  - REVIEW 2026-07-09: contract review completed. The computed readback fields, including `provisioning_info.state`, were added during review. No unresolved contract deviations remain in unit-tested behavior; acceptance scenarios remain skeleton-gated until Databricks credentials are available.
+  - REVIEW 2026-07-09: contract review completed. The computed readback fields, including `provisioning_info.state`, were added during review. No unresolved contract deviations remained in unit-tested behavior at that time.
+  - REVIEW 2026-07-17: removed `provider_config` from the resource contract because the Databricks Unity Catalog Connections SDK/API path used by this provider has no corresponding create/update field; users select the target workspace via provider configuration.
+  - RED 2026-07-17: `go test ./internal/resources -run 'TestPostgreSQLConnection(SchemaAvoids|SchemaDoesNotExposeUnsupported|CreateApplies|ReadTreats|Lifecycle)'` failed for owner Optional-only drift, exposed unsupported `provider_config`, missing post-create owner reconciliation, and missing remote-not-found handling.
+  - GREEN 2026-07-17: `go test ./internal/resources -run 'TestPostgreSQLConnection(SchemaAvoids|SchemaDoesNotExposeUnsupported|CreateApplies|ReadTreats|Lifecycle)'` passed after owner was made Optional+Computed, `provider_config` was removed, configured owner is reconciled after create when Databricks defaults the creator, and remote not found removes state.
+  - RED 2026-07-17: `go test ./internal/resources -run 'TestPostgreSQLConnectionAcceptance'` failed because acceptance environment parsing and HCL generation helpers were missing.
+  - GREEN 2026-07-17: `go test ./internal/resources -run 'TestPostgreSQLConnectionAcceptance'` passed after adding acceptance input validation, secret-reference HCL generation, and Terraform Plugin Testing-backed acceptance steps.
 
 ---
 
