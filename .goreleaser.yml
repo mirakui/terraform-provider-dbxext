@@ -1,0 +1,39 @@
+# Release archives follow the Terraform Registry naming convention so the
+# binaries can be dropped into a local plugin directory unchanged, even though
+# this provider is not published to the registry.
+version: 2
+
+before:
+  hooks:
+    - go mod download
+
+builds:
+  - env:
+      - CGO_ENABLED=0
+    mod_timestamp: '{{ .CommitTimestamp }}'
+    flags:
+      - -trimpath
+    ldflags:
+      - '-s -w -X main.version={{ .Version }}'
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    binary: '{{ .ProjectName }}_v{{ .Version }}'
+
+archives:
+  - formats: [zip]
+    name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+
+checksum:
+  name_template: '{{ .ProjectName }}_{{ .Version }}_SHA256SUMS'
+  algorithm: sha256
+
+release:
+  draft: false
+
+changelog:
+  disable: true

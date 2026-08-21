@@ -21,6 +21,40 @@ password_secret {
 The provider stores only the secret scope, key, and version marker. It does not
 read or store the raw PostgreSQL password.
 
+## Installation
+
+This provider is not published to the Terraform Registry. Each GitHub release
+carries a zip per platform, which Terraform picks up from the local plugin
+directory:
+
+```bash
+VERSION=1.0.0
+PLATFORM=darwin_arm64
+TARGET="$HOME/.terraform.d/plugins/registry.terraform.io/mirakui/dbxext/$VERSION/$PLATFORM"
+
+mkdir -p "$TARGET"
+gh release download "v$VERSION" \
+  --repo mirakui/terraform-provider-dbxext \
+  --pattern "terraform-provider-dbxext_${VERSION}_${PLATFORM}.zip"
+unzip -j "terraform-provider-dbxext_${VERSION}_${PLATFORM}.zip" -d "$TARGET"
+```
+
+Then pin the version in the configuration:
+
+```hcl
+terraform {
+  required_providers {
+    dbxext = {
+      source  = "mirakui/dbxext"
+      version = "1.0.0"
+    }
+  }
+}
+```
+
+While working on the provider itself, prefer a `dev_overrides` block in the CLI
+configuration over installing a release.
+
 ## Local Development
 
 ```bash
