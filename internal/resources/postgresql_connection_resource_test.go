@@ -10,6 +10,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	rschema "github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
 func TestPostgreSQLConnectionSchemaRequiresTypedFields(t *testing.T) {
@@ -129,7 +130,7 @@ func TestPostgreSQLConnectionValidationRejectsInvalidRequiredValues(t *testing.T
 		Host:                  "postgres.example.com",
 		Port:                  5432,
 		User:                  "postgres_user",
-		PasswordSecret:        PasswordSecretModel{Scope: "scope", Key: "password"},
+		PasswordSecret:        &PasswordSecretModel{Scope: "scope", Key: "password"},
 		PasswordSecretVersion: 1,
 	}
 
@@ -171,7 +172,7 @@ func TestPostgreSQLConnectionCreateUsesSecretBackedTypedOptions(t *testing.T) {
 		Host:                  "postgres.example.com",
 		Port:                  5432,
 		User:                  "postgres_user",
-		PasswordSecret:        PasswordSecretModel{Scope: "scope", Key: "password"},
+		PasswordSecret:        &PasswordSecretModel{Scope: "scope", Key: "password"},
 		PasswordSecretVersion: 1,
 	})
 	if err != nil {
@@ -187,7 +188,7 @@ func TestPostgreSQLConnectionCreateUsesSecretBackedTypedOptions(t *testing.T) {
 	if strings.Contains(fmt.Sprintf("%#v %#v", client.created, state), rawPassword) {
 		t.Fatal("raw password sentinel leaked into request or state")
 	}
-	if state.ID != "psql" || state.ConnectionID != "connection-id" {
+	if state.ID.ValueString() != "psql" || state.ConnectionID.ValueString() != "connection-id" {
 		t.Fatalf("unexpected created state: %#v", state)
 	}
 }
@@ -200,7 +201,7 @@ func TestPostgreSQLConnectionCreateAppliesConfiguredOwnerAfterCreate(t *testing.
 		updateOwner: "data-owner@example.com",
 	}
 	model := validPostgreSQLConnectionModel()
-	model.Owner = "data-owner@example.com"
+	model.Owner = types.StringValue("data-owner@example.com")
 
 	state, err := CreatePostgreSQLConnection(context.Background(), client, model)
 	if err != nil {
@@ -216,7 +217,7 @@ func TestPostgreSQLConnectionCreateAppliesConfiguredOwnerAfterCreate(t *testing.
 	if client.updated.Options["password"] != "secret('scope', 'password')" {
 		t.Fatalf("expected owner update to preserve password secret reference, got %q", client.updated.Options["password"])
 	}
-	if state.Owner != "data-owner@example.com" {
+	if state.Owner.ValueString() != "data-owner@example.com" {
 		t.Fatalf("expected final state owner data-owner@example.com, got %q", state.Owner)
 	}
 }
@@ -271,7 +272,7 @@ func TestPostgreSQLConnectionUpdatePreservesPasswordSecretReference(t *testing.T
 	plan.Host = "postgres-new.example.com"
 	plan.Port = 5433
 	plan.User = "postgres_user_new"
-	plan.Owner = "data-owner@example.com"
+	plan.Owner = types.StringValue("data-owner@example.com")
 	plan.EnvironmentSettings = &EnvironmentSettingsModel{
 		EnvironmentVersion: "14.2",
 		JavaDependencies:   []string{"org.postgresql:postgresql:42.7.4"},
@@ -300,8 +301,8 @@ func TestPostgreSQLConnectionImportRequiresSecretMetadataBeforeManagedUpdate(t *
 	t.Parallel()
 
 	imported := PostgreSQLConnectionModel{
-		ID:           "psql",
-		ConnectionID: "connection-id",
+		ID:           types.StringValue("psql"),
+		ConnectionID: types.StringValue("connection-id"),
 		Name:         "psql",
 		Host:         "postgres.example.com",
 		Port:         5432,
@@ -312,7 +313,7 @@ func TestPostgreSQLConnectionImportRequiresSecretMetadataBeforeManagedUpdate(t *
 
 	complete := imported
 	complete.User = "postgres_user"
-	complete.PasswordSecret = PasswordSecretModel{Scope: "scope", Key: "password"}
+	complete.PasswordSecret = &PasswordSecretModel{Scope: "scope", Key: "password"}
 	complete.PasswordSecretVersion = 1
 	if diags := ValidatePostImportUpdateReady(context.Background(), complete); diags.HasError() {
 		t.Fatalf("expected completed imported state to be update-ready, got diagnostics: %s", diags.Errors())
@@ -372,17 +373,17 @@ func TestPostgreSQLConnectionReadMapsComputedRemoteFields(t *testing.T) {
 		ProvisioningInfo: &dbclient.ProvisioningInfo{State: "ACTIVE"},
 	})
 
-	if state.FullName != "metastore.psql" ||
-		state.MetastoreID != "metastore-id" ||
-		state.CredentialType != "USERNAME_PASSWORD" ||
-		state.URL != "postgresql://postgres.example.com:5432" ||
-		state.CreatedAt != 1000 ||
-		state.CreatedBy != "creator@example.com" ||
-		state.UpdatedAt != 2000 ||
-		state.UpdatedBy != "updater@example.com" {
+	if state.FullName.ValueString() != "metastore.psql" ||
+		state.MetastoreID.ValueString() != "metastore-id" ||
+		state.CredentialType.ValueString() != "USERNAME_PASSWORD" ||
+		state.URL.ValueString() != "postgresql://postgres.example.com:5432" ||
+		state.CreatedAt.ValueInt64() != 1000 ||
+		state.CreatedBy.ValueString() != "creator@example.com" ||
+		state.UpdatedAt.ValueInt64() != 2000 ||
+		state.UpdatedBy.ValueString() != "updater@example.com" {
 		t.Fatalf("computed fields were not mapped from remote state: %#v", state)
 	}
-	if state.Comment != "remote comment" || state.ReadOnly == nil || !*state.ReadOnly {
+	if state.Comment.ValueString() != "remote comment" || state.ReadOnly == nil || !*state.ReadOnly {
 		t.Fatalf("optional metadata was not mapped from remote state: %#v", state)
 	}
 	if state.Properties["purpose"] != "analytics" {
@@ -391,7 +392,7 @@ func TestPostgreSQLConnectionReadMapsComputedRemoteFields(t *testing.T) {
 	if state.EnvironmentSettings == nil || state.EnvironmentSettings.EnvironmentVersion != "14.2" {
 		t.Fatalf("environment settings were not mapped from remote state: %#v", state.EnvironmentSettings)
 	}
-	if state.ProvisioningInfo == nil || state.ProvisioningInfo.State != "ACTIVE" {
+	if state.ProvisioningInfo.IsNull() || state.ProvisioningInfo.Attributes()["state"] != types.StringValue("ACTIVE") {
 		t.Fatalf("provisioning info was not mapped from remote state: %#v", state.ProvisioningInfo)
 	}
 }
@@ -425,18 +426,23 @@ func postgreSQLConnectionSchema(t *testing.T) rschema.Schema {
 
 func validPostgreSQLConnectionModel() PostgreSQLConnectionModel {
 	return PostgreSQLConnectionModel{
-		ID:                    "psql",
-		ConnectionID:          "connection-id",
+		ID:                    types.StringValue("psql"),
+		ConnectionID:          types.StringValue("connection-id"),
 		Name:                  "psql",
 		Host:                  "postgres.example.com",
 		Port:                  5432,
 		User:                  "postgres_user",
-		PasswordSecret:        PasswordSecretModel{Scope: "scope", Key: "password"},
+		PasswordSecret:        &PasswordSecretModel{Scope: "scope", Key: "password"},
 		PasswordSecretVersion: 1,
 	}
 }
 
 func withString(model PostgreSQLConnectionModel, field string, value string) PostgreSQLConnectionModel {
+	if model.PasswordSecret != nil {
+		secret := *model.PasswordSecret
+		model.PasswordSecret = &secret
+	}
+
 	switch field {
 	case "name":
 		model.Name = value
