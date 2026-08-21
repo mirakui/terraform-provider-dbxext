@@ -9,6 +9,7 @@ import (
 
 	dbclient "github.com/mirakui/terraform-provider-dbxext/internal/databricks"
 
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -28,29 +29,36 @@ type PostgreSQLConnectionResource struct {
 	client dbclient.ConnectionClient
 }
 
+// Attributes Terraform computes or leaves optional arrive as unknown or null,
+// which plain Go types cannot represent, so they use framework types. Required
+// attributes are always known in a plan or state and stay plain.
 type PostgreSQLConnectionModel struct {
-	ID                    string                    `tfsdk:"id"`
-	ConnectionID          string                    `tfsdk:"connection_id"`
-	FullName              string                    `tfsdk:"full_name"`
-	MetastoreID           string                    `tfsdk:"metastore_id"`
-	CredentialType        string                    `tfsdk:"credential_type"`
-	URL                   string                    `tfsdk:"url"`
-	CreatedAt             int64                     `tfsdk:"created_at"`
-	CreatedBy             string                    `tfsdk:"created_by"`
-	UpdatedAt             int64                     `tfsdk:"updated_at"`
-	UpdatedBy             string                    `tfsdk:"updated_by"`
-	ProvisioningInfo      *ProvisioningInfoModel    `tfsdk:"provisioning_info"`
+	ID                    types.String              `tfsdk:"id"`
+	ConnectionID          types.String              `tfsdk:"connection_id"`
+	FullName              types.String              `tfsdk:"full_name"`
+	MetastoreID           types.String              `tfsdk:"metastore_id"`
+	CredentialType        types.String              `tfsdk:"credential_type"`
+	URL                   types.String              `tfsdk:"url"`
+	CreatedAt             types.Int64               `tfsdk:"created_at"`
+	CreatedBy             types.String              `tfsdk:"created_by"`
+	UpdatedAt             types.Int64               `tfsdk:"updated_at"`
+	UpdatedBy             types.String              `tfsdk:"updated_by"`
+	ProvisioningInfo      types.Object              `tfsdk:"provisioning_info"`
 	Name                  string                    `tfsdk:"name"`
 	Host                  string                    `tfsdk:"host"`
 	Port                  int64                     `tfsdk:"port"`
 	User                  string                    `tfsdk:"user"`
-	PasswordSecret        PasswordSecretModel       `tfsdk:"password_secret"`
+	PasswordSecret        *PasswordSecretModel      `tfsdk:"password_secret"`
 	PasswordSecretVersion int64                     `tfsdk:"password_secret_version"`
-	Comment               string                    `tfsdk:"comment"`
+	Comment               types.String              `tfsdk:"comment"`
 	ReadOnly              *bool                     `tfsdk:"read_only"`
-	Owner                 string                    `tfsdk:"owner"`
+	Owner                 types.String              `tfsdk:"owner"`
 	Properties            map[string]string         `tfsdk:"properties"`
 	EnvironmentSettings   *EnvironmentSettingsModel `tfsdk:"environment_settings"`
+}
+
+var provisioningInfoAttributeTypes = map[string]attr.Type{
+	"state": types.StringType,
 }
 
 type PasswordSecretModel struct {
@@ -338,8 +346,12 @@ func ValidatePostgreSQLConnectionModel(ctx context.Context, model PostgreSQLConn
 	addRequiredStringDiagnostic("name", model.Name)
 	addRequiredStringDiagnostic("host", model.Host)
 	addRequiredStringDiagnostic("user", model.User)
-	addRequiredStringDiagnostic("password_secret.scope", model.PasswordSecret.Scope)
-	addRequiredStringDiagnostic("password_secret.key", model.PasswordSecret.Key)
+	if model.PasswordSecret == nil {
+		diags.AddError("Invalid PostgreSQL connection configuration", "password_secret must be set.")
+	} else {
+		addRequiredStringDiagnostic("password_secret.scope", model.PasswordSecret.Scope)
+		addRequiredStringDiagnostic("password_secret.key", model.PasswordSecret.Key)
+	}
 
 	if model.Port < 1 || model.Port > 65535 {
 		diags.AddError("Invalid PostgreSQL connection configuration", "port must be between 1 and 65535.")
@@ -375,9 +387,9 @@ func CreatePostgreSQLConnection(ctx context.Context, client dbclient.ConnectionC
 	if err != nil {
 		return PostgreSQLConnectionModel{}, err
 	}
-	req.Comment = optionalString(model.Comment)
+	req.Comment = optionalString(model.Comment.ValueString())
 	req.ReadOnly = model.ReadOnly
-	req.Owner = strings.TrimSpace(model.Owner)
+	req.Owner = strings.TrimSpace(model.Owner.ValueString())
 	req.Properties = model.Properties
 
 	remote, err := client.CreateConnection(ctx, req)
@@ -386,7 +398,8 @@ func CreatePostgreSQLConnection(ctx context.Context, client dbclient.ConnectionC
 	}
 
 	state := mergeConnectionInfo(model, remote)
-	if strings.TrimSpace(model.Owner) != "" && state.Owner != strings.TrimSpace(model.Owner) {
+	desiredOwner := strings.TrimSpace(model.Owner.ValueString())
+	if desiredOwner != "" && state.Owner.ValueString() != desiredOwner {
 		return UpdatePostgreSQLConnection(ctx, client, state, model)
 	}
 
@@ -430,7 +443,7 @@ func UpdatePostgreSQLConnection(ctx context.Context, client dbclient.ConnectionC
 			Key:   plan.PasswordSecret.Key,
 		},
 		PasswordSecretVersion: plan.PasswordSecretVersion,
-		Owner:                 plan.Owner,
+		Owner:                 plan.Owner.ValueString(),
 		EnvironmentSettings:   toDBClientEnvironmentSettings(plan.EnvironmentSettings),
 	})
 	if err != nil {
@@ -464,26 +477,33 @@ func PostgreSQLConnectionPasswordSecretVersionChanged(prior PostgreSQLConnection
 
 func mergeConnectionInfo(model PostgreSQLConnectionModel, remote dbclient.ConnectionInfo) PostgreSQLConnectionModel {
 	if remote.Name != "" {
-		model.ID = remote.Name
+		model.ID = types.StringValue(remote.Name)
 		model.Name = remote.Name
 	}
-	if model.ID == "" {
-		model.ID = model.Name
+	if model.ID.ValueString() == "" {
+		model.ID = types.StringValue(model.Name)
 	}
-	model.ConnectionID = remote.ID
-	model.FullName = remote.FullName
-	model.MetastoreID = remote.MetastoreID
-	model.CredentialType = remote.CredentialType
-	model.URL = remote.URL
-	model.CreatedAt = remote.CreatedAt
-	model.CreatedBy = remote.CreatedBy
-	model.UpdatedAt = remote.UpdatedAt
-	model.UpdatedBy = remote.UpdatedBy
+	model.ConnectionID = types.StringValue(remote.ID)
+	model.FullName = types.StringValue(remote.FullName)
+	model.MetastoreID = types.StringValue(remote.MetastoreID)
+	model.CredentialType = types.StringValue(remote.CredentialType)
+	model.URL = types.StringValue(remote.URL)
+	model.CreatedAt = types.Int64Value(remote.CreatedAt)
+	model.CreatedBy = types.StringValue(remote.CreatedBy)
+	model.UpdatedAt = types.Int64Value(remote.UpdatedAt)
+	model.UpdatedBy = types.StringValue(remote.UpdatedBy)
 	if remote.ProvisioningInfo != nil {
-		model.ProvisioningInfo = &ProvisioningInfoModel{State: remote.ProvisioningInfo.State}
+		model.ProvisioningInfo = types.ObjectValueMust(provisioningInfoAttributeTypes, map[string]attr.Value{
+			"state": types.StringValue(remote.ProvisioningInfo.State),
+		})
+	} else {
+		// Computed attributes must not stay unknown once apply finishes.
+		model.ProvisioningInfo = types.ObjectNull(provisioningInfoAttributeTypes)
 	}
 	if remote.Comment != "" {
-		model.Comment = remote.Comment
+		model.Comment = types.StringValue(remote.Comment)
+	} else if model.Comment.IsUnknown() {
+		model.Comment = types.StringNull()
 	}
 	if remote.ReadOnly != nil {
 		model.ReadOnly = remote.ReadOnly
@@ -503,7 +523,9 @@ func mergeConnectionInfo(model PostgreSQLConnectionModel, remote dbclient.Connec
 		}
 	}
 	if remote.Owner != "" {
-		model.Owner = remote.Owner
+		model.Owner = types.StringValue(remote.Owner)
+	} else if model.Owner.IsUnknown() {
+		model.Owner = types.StringNull()
 	}
 	if remote.Properties != nil {
 		model.Properties = remote.Properties
